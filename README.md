@@ -1,16 +1,16 @@
 # bigjpg-open
 
-Cliente TypeScript para a API aberta do [Bigjpg](https://bigjpg.com) (a mesma que o site usa), para ampliar imagens com IA. Não precisa de chave de API.
+TypeScript client for the [Bigjpg](https://bigjpg.com) API (the same one the website uses) to enlarge images with AI. No API key required.
 
-## Instalação
+## Installation
 
 ```bash
 npm install bigjpg-open
 ```
 
-Requer Node.js 18+ (usa `fetch` nativo).
+Requires Node.js 18+ (uses the native `fetch`).
 
-## Uso
+## Usage
 
 ```ts
 import { readFile } from "node:fs/promises"
@@ -19,38 +19,38 @@ import { BigjpgOpen } from "bigjpg-open"
 
 const client = new BigjpgOpen()
 
-// A partir de uma URL (baixada e enviada ao Bigjpg)
+// From a URL (downloaded and uploaded to Bigjpg)
 const task = await client.enlarge({ input: "https://github.com/marcuth.png", scale: 2, style: "photo", noise: 1 })
 console.log(task.url)
 
-// A partir de um arquivo local
+// From a local file
 await client.enlarge({
     input: { data: await readFile("image.png"), filename: "image.png", filetype: "image/png" },
 })
 ```
 
-### Controle manual
+### Manual control
 
 ```ts
 const { fileUrl } = await client.upload({ data, filename: "a.png", filetype: "image/png" })
 const { tid } = await client.createTask({ input: fileUrl, fileName: "a.png", fileSize, width, height })
-const task = await client.waitForTask(tid) // ou client.getTask(tid)
+const task = await client.waitForTask(tid) // or client.getTask(tid)
 ```
 
-## Opções
+## Options
 
-| Opção   | Valores                      | Padrão  |
-| ------- | ---------------------------- | ------- |
-| `style` | `"art"`, `"photo"`           | `"art"` |
-| `noise` | `-1` (nenhum) a `3` (máximo) | `0`     |
-| `scale` | `2`, `4`, `8`, `16`          | `2`     |
+| Option  | Values                        | Default |
+| ------- | ----------------------------- | ------- |
+| `style` | `"art"`, `"photo"`            | `"art"` |
+| `noise` | `-1` (none) to `3` (highest)  | `0`     |
+| `scale` | `2`, `4`, `8`, `16`           | `2`     |
 
-Largura e altura são lidas do cabeçalho de PNG, JPEG, GIF e WebP; para outros formatos, informe `width` e `height`.
+Width and height are read from the PNG, JPEG, GIF and WebP headers; for other formats, pass `width` and `height`.
 
-## Erros
+## Errors
 
-Falhas lançam `BigjpgError` com `code`: o `status` devolvido pelo site, ou `upload_failed`, `download_failed`, `unknown_image_size`, `task_failed`, `timeout`.
+Failures throw a `BigjpgError` whose `code` is either the `status` returned by the site, or one of `upload_failed`, `download_failed`, `unknown_image_size`, `task_failed` and `timeout`.
 
-## Licença
+## License
 
 MIT
