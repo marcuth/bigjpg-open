@@ -3,37 +3,47 @@ export type BigjpgStyle = "art" | "photo"
 /** -1 = none, 0 = low, 1 = medium, 2 = high, 3 = highest */
 export type BigjpgNoise = -1 | 0 | 1 | 2 | 3
 
-/** Enlargement factor. Free accounts are limited to 2x and 4x. */
+/** Enlargement factor (the site's `x2` field). */
 export type BigjpgScale = 2 | 4 | 8 | 16
 
 export type BigjpgTaskStatus = "new" | "process" | "success" | "error"
 
 export type BigjpgClientOptions = {
-    apiKey: string
     baseUrl?: string
     fetch?: typeof fetch
 }
 
-export type UploadOptions = {
-    data: Uint8Array | ArrayBuffer | Blob
+export type ImageData = {
+    data: Uint8Array
     filename: string
-    /** MIME type, e.g. `image/jpeg`. */
+    /** MIME type, e.g. `image/png`. */
     filetype: string
+    /** Read from the image header when omitted (PNG, JPEG, GIF, WebP). */
+    width?: number
+    height?: number
+}
+
+export type UploadResult = {
+    /** Public URL of the uploaded file, used as the task input. */
+    fileUrl: string
 }
 
 export type CreateTaskOptions = {
-    /** Publicly reachable http(s) image URL. */
+    /** `fileUrl` returned by `upload`. */
     input: string
+    fileName: string
+    fileSize: number
+    width: number
+    height: number
     style?: BigjpgStyle
     noise?: BigjpgNoise
     scale?: BigjpgScale
-    fileName?: string
 }
 
 export type CreateTaskResult = {
     tid: string
+    /** Estimated processing time in minutes. */
     minute: number
-    remainingApiCalls: number
 }
 
 export type BigjpgTask = {
@@ -51,7 +61,8 @@ export type WaitOptions = {
     signal?: AbortSignal
 }
 
-export type EnlargeOptions = Omit<CreateTaskOptions, "input"> &
-    WaitOptions & {
-        input: string | UploadOptions
+export type EnlargeOptions = WaitOptions &
+    Pick<CreateTaskOptions, "style" | "noise" | "scale"> & {
+        /** Image bytes, or an http(s) URL that will be downloaded and uploaded. */
+        input: string | ImageData
     }

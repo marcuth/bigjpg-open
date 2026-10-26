@@ -1,4 +1,5 @@
 import { BigjpgError } from "./errors"
+import { getImageSize } from "./image-size"
 import type {
     BigjpgClientOptions,
     BigjpgTask,
@@ -6,19 +7,19 @@ import type {
     CreateTaskOptions,
     CreateTaskResult,
     EnlargeOptions,
-    UploadOptions,
+    ImageData,
+    UploadResult,
     WaitOptions,
 } from "./types"
 
 const DEFAULT_BASE_URL = "https://bigjpg.com"
-const MAX_BATCH = 100
-const SCALE_TO_X2 = { 2: 1, 4: 2, 8: 3, 16: 4 } as const
+const HEADERS = {
+    Referer: "https://bigjpg.com/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+    Accept: "application/json, text/plain, */*",
+}
 
-type TaskPayload =
-    | [BigjpgTaskStatus, string?, (string | number)?]
-    | { status: BigjpgTaskStatus; url?: string; size?: number | string }
-
-const sleep =(ms: number, signal?: AbortSignal) =>
+const sleep = (ms: number, signal?: AbortSignal) =>
     new Promise<void>((resolve, reject) => {
         if (signal?.aborted) return reject(signal.reason)
         const timer = setTimeout(resolve, ms)
@@ -33,12 +34,10 @@ const sleep =(ms: number, signal?: AbortSignal) =>
     })
 
 export class BigjpgOpen {
-    private readonly apiKey: string
     private readonly baseUrl: string
     private readonly fetchFn: typeof fetch
 
-    constructor(options: BigjpgClientOptions) {
-        this.apiKey = options.apiKey
+    constructor(options: BigjpgClientOptions = {}) {
         this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "")
         this.fetchFn = options.fetch ?? fetch
     }
@@ -46,7 +45,7 @@ export class BigjpgOpen {
     private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
         const response = await this.fetchFn(`${this.baseUrl}${path}`, {
             ...init,
-            headers: { "X-API-KEY": this.apiKey, ...init.headers },
+            headers: { ...HEADERS, ...init.headers },
         })
 
         const text = await response.text()
@@ -57,84 +56,73 @@ export class BigjpgOpen {
             throw new BigjpgError("unexpected_response", `Unexpected response (${response.status}): ${text.slice(0, 200)}`)
         }
 
-        // Errors are reported through the `status` field (e.g. `param_error`).
-        if (body && typeof body.status === "string" && body.status !== "ok" && !("tid" in body)) {
+        if (body && typeof body.status === "string" && body.status !== "ok") {
             throw new BigjpgError(body.status)
         }
 
         return body as T
     }
 
-    /** Uploads a local image and returns a public URL usable as `input`. */
-    async upload(options: UploadOptions): Promise<string> {
-        const form = new URLSearchParams({ filename: options.filename, filetype: options.filetype })
-        const { url, fileurl } = await this.request<{ url: string; fileurl: string }>("/api/img_upload", {
+    /** Uploads an image to Bigjpg's storage. */
+    async upload(image: Pick<ImageData, "data" | "filename" | "filetype">): Promise<UploadResult> {
+        const { url, fileurl } = await this.request<{ url: string; fileurl: string }>("/api/sign_upload", {
             method: "POST",
-            body: form,
+            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+            body: new URLSearchParams({ filename: image.filename, filetype: image.filetype }),
         })
 
-        if (!url || !fileurl) throw new BigjpgError("unexpected_response", "Upload response missing url/fileurl")
+        if (!url || !fileurl) throw new BigjpgError("unexpected_response", "sign_upload response missing url/fileurl")
 
         const put = await this.fetchFn(url, {
             method: "PUT",
-            headers: { "Content-Type": options.filetype },
-            body: options.data as Blob,
+            headers: { "Content-Type": image.filetype },
+            body: image.data as Uint8Array<ArrayBuffer>,
         })
 
         if (!put.ok) throw new BigjpgError("upload_failed", `Upload failed with status ${put.status}`)
 
-        return fileurl
+        return { fileUrl: fileurl }
     }
 
     async createTask(options: CreateTaskOptions): Promise<CreateTaskResult> {
-        const body: Record<string, unknown> = {
+        const conf = {
+            x2: String(options.scale ?? 2),
             style: options.style ?? "art",
-            noise: options.noise ?? 3,
-            x2: SCALE_TO_X2[options.scale ?? 2],
+            noise: String(options.noise ?? 0),
+            file_name: options.fileName,
+            files_size: options.fileSize,
+            file_height: options.height,
+            file_width: options.width,
             input: options.input,
+            storage: "oss",
         }
-        if (options.fileName) body.file_name = options.fileName
 
-        const result = await this.request<{ tid: string; minute: number; remaining_api_calls: number }>("/api/task/", {
+        const result = await this.request<{ info: string; time: number }>("/task", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+            body: new URLSearchParams({ conf: JSON.stringify(conf) }),
         })
 
-        return { tid: result.tid, minute: result.minute, remainingApiCalls: result.remaining_api_calls }
+        return { tid: result.info, minute: result.time }
     }
 
-    /** Queries up to 100 tasks at once. */
     async getTasks(ids: string[]): Promise<BigjpgTask[]> {
-        const tasks: BigjpgTask[] = []
+        const result = await this.request<Record<string, [BigjpgTaskStatus, string?, (string | number)?]>>(
+            `/free?fids=${encodeURIComponent(JSON.stringify(ids))}`,
+        )
 
-        for (let i = 0; i < ids.length; i += MAX_BATCH) {
-            const chunk = ids.slice(i, i + MAX_BATCH)
-            const result = await this.request<Record<string, TaskPayload>>(`/api/task/${chunk.join(",")}`)
-
-            for (const id of chunk) {
-                const raw = result[id]
-                if (!raw) continue
-                // The site returns `[status, url, size]`; the docs describe an object. Accept both.
-                const [status, url, size] = Array.isArray(raw) ? raw : [raw.status, raw.url, raw.size]
-                tasks.push({ id, status, url: url || null, size: size ? Number(size) : null })
-            }
-        }
-
-        return tasks
+        return ids.flatMap((id) => {
+            const raw = result[id]
+            if (!raw) return []
+            const [status, url, size] = raw
+            return [{ id, status, url: url || null, size: size ? Number(size) : null }]
+        })
     }
 
     async getTask(id: string): Promise<BigjpgTask> {
         const [task] = await this.getTasks([id])
         if (!task) throw new BigjpgError("unexpected_response", `Task ${id} not found in response`)
         return task
-    }
-
-    /** Retries failed tasks (up to 100 per request). */
-    async retryTasks(ids: string[]): Promise<void> {
-        for (let i = 0; i < ids.length; i += MAX_BATCH) {
-            await this.request(`/api/task/${ids.slice(i, i + MAX_BATCH).join(",")}`, { method: "POST" })
-        }
     }
 
     /** Polls until the task succeeds. Throws if it errors or the timeout elapses. */
@@ -151,11 +139,34 @@ export class BigjpgOpen {
         }
     }
 
-    /** Uploads (if needed), creates the task and waits for the enlarged image. */
+    private async download(url: string): Promise<ImageData> {
+        const response = await this.fetchFn(url)
+        if (!response.ok) throw new BigjpgError("download_failed", `Download failed with status ${response.status}`)
+
+        const filetype = response.headers.get("content-type")?.split(";")[0].trim() || "image/png"
+        const name = new URL(response.url || url).pathname.split("/").pop() || "image"
+        const filename = name.includes(".") ? name : `${name}.${filetype.split("/")[1] ?? "png"}`
+
+        return { data: new Uint8Array(await response.arrayBuffer()), filename, filetype }
+    }
+
+    /** Uploads the image (downloading it first if given a URL), creates the task and waits for the result. */
     async enlarge(options: EnlargeOptions): Promise<BigjpgTask> {
         const { input, interval, timeout, signal, ...taskOptions } = options
-        const url = typeof input === "string" ? input : await this.upload(input)
-        const { tid } = await this.createTask({ ...taskOptions, input: url })
+        const image = typeof input === "string" ? await this.download(input) : input
+
+        const size = image.width && image.height ? { width: image.width, height: image.height } : getImageSize(image.data)
+        if (!size) throw new BigjpgError("unknown_image_size", "Could not read image size; pass width and height")
+
+        const { fileUrl } = await this.upload(image)
+        const { tid } = await this.createTask({
+            ...taskOptions,
+            input: fileUrl,
+            fileName: image.filename,
+            fileSize: image.data.byteLength,
+            ...size,
+        })
+
         return this.waitForTask(tid, { interval, timeout, signal })
     }
 }

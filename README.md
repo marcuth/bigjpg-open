@@ -1,6 +1,6 @@
 # bigjpg-open
 
-Cliente TypeScript para a **API aberta (oficial)** do [Bigjpg](https://bigjpg.com/api), usada para ampliar imagens com IA. Requer conta paga e uma chave de API.
+Cliente TypeScript para a API aberta do [Bigjpg](https://bigjpg.com) (a mesma que o site usa), para ampliar imagens com IA. Não precisa de chave de API.
 
 ## Instalação
 
@@ -13,50 +13,43 @@ Requer Node.js 18+ (usa `fetch` nativo).
 ## Uso
 
 ```ts
+import { readFile } from "node:fs/promises"
+
 import { BigjpgOpen } from "bigjpg-open"
 
-const client = new BigjpgOpen({ apiKey: process.env.BIGJPG_API_KEY! })
+const client = new BigjpgOpen()
 
-// A partir de uma URL pública
-const task = await client.enlarge({
-    input: "https://example.com/image.jpg",
-    style: "photo",
-    noise: 1,
-    scale: 4,
-})
+// A partir de uma URL (baixada e enviada ao Bigjpg)
+const task = await client.enlarge({ input: "https://github.com/marcuth.png", scale: 2, style: "photo", noise: 1 })
 console.log(task.url)
 
 // A partir de um arquivo local
-import { readFile } from "node:fs/promises"
-
-const result = await client.enlarge({
+await client.enlarge({
     input: { data: await readFile("image.png"), filename: "image.png", filetype: "image/png" },
-    scale: 2,
 })
 ```
 
 ### Controle manual
 
 ```ts
-const { tid } = await client.createTask({ input: url })
-const task = await client.getTask(tid) // status: "new" | "process" | "success" | "error"
-await client.waitForTask(tid, { interval: 3000, timeout: 600_000 })
-await client.retryTasks([tid])
+const { fileUrl } = await client.upload({ data, filename: "a.png", filetype: "image/png" })
+const { tid } = await client.createTask({ input: fileUrl, fileName: "a.png", fileSize, width, height })
+const task = await client.waitForTask(tid) // ou client.getTask(tid)
 ```
 
 ## Opções
 
-| Opção   | Valores                    | Padrão |
-| ------- | -------------------------- | ------ |
-| `style` | `"art"`, `"photo"`         | `"art"` |
-| `noise` | `-1` (nenhum) a `3` (máximo) | `3`    |
-| `scale` | `2`, `4`, `8`, `16`        | `2`    |
+| Opção   | Valores                      | Padrão  |
+| ------- | ---------------------------- | ------- |
+| `style` | `"art"`, `"photo"`           | `"art"` |
+| `noise` | `-1` (nenhum) a `3` (máximo) | `0`     |
+| `scale` | `2`, `4`, `8`, `16`          | `2`     |
 
-Contas gratuitas estão limitadas a `scale` 2 e 4.
+Largura e altura são lidas do cabeçalho de PNG, JPEG, GIF e WebP; para outros formatos, informe `width` e `height`.
 
 ## Erros
 
-Falhas lançam `BigjpgError` com `code`: `valid_api_key_required`, `requires_vip`, `month_limit`, `param_error`, `input_url_error`, `task_failed`, `timeout`.
+Falhas lançam `BigjpgError` com `code`: o `status` devolvido pelo site, ou `upload_failed`, `download_failed`, `unknown_image_size`, `task_failed`, `timeout`.
 
 ## Licença
 

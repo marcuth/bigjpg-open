@@ -1,9 +1,7 @@
 export type BigjpgErrorCode =
-    | "valid_api_key_required"
-    | "requires_vip"
-    | "month_limit"
-    | "param_error"
-    | "input_url_error"
+    | "upload_failed"
+    | "download_failed"
+    | "unknown_image_size"
     | "task_failed"
     | "timeout"
     | "unexpected_response"
