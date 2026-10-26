@@ -1,5 +1,3 @@
-export function main() {
-    console.log("Hello from bigjpg-open")
-}
-
-main()
+export * from "./client"
+export * from "./errors"
+export * from "./types"
